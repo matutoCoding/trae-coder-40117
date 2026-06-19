@@ -22,6 +22,8 @@ interface DeviceState {
   addDisinfectionRecord: (record: Omit<DisinfectionRecord, 'id'>) => void
   getDeviceById: (id: string) => Device | undefined
   getDisinfectionRecordsByDevice: (deviceId: string) => DisinfectionRecord[]
+  getDisinfectionRecordByQueueEntry: (queueEntryId: string) => DisinfectionRecord | undefined
+  getDisinfectionRecordsByDate: (date: string) => DisinfectionRecord[]
 }
 
 export const useDeviceStore = create<DeviceState>()(
@@ -65,7 +67,21 @@ export const useDeviceStore = create<DeviceState>()(
       getDeviceById: (id) => get().devices.find((d) => d.id === id),
       getDisinfectionRecordsByDevice: (deviceId) =>
         get().disinfectionRecords.filter((r) => r.deviceId === deviceId),
+      getDisinfectionRecordByQueueEntry: (queueEntryId) =>
+        get().disinfectionRecords.find((r) => r.queueEntryId === queueEntryId),
+      getDisinfectionRecordsByDate: (date) =>
+        get().disinfectionRecords.filter((r) => r.timestamp.startsWith(date)),
     }),
-    { name: 'vr-device-store' }
+    {
+      name: 'vr-device-store',
+      onRehydrateStorage: () => (state) => {
+        if (state && state.disinfectionRecords) {
+          state.disinfectionRecords = state.disinfectionRecords.map((r) => ({
+            queueEntryId: '',
+            ...r,
+          }))
+        }
+      },
+    }
   )
 )

@@ -6,7 +6,7 @@ export type VipLevel = 'none' | 'silver' | 'gold' | 'platinum'
 export type QueuePriority = 'normal' | 'vip' | 'emergency'
 export type QueueEntryStatus = 'waiting' | 'serving' | 'skipped' | 'completed'
 export type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'conflict'
-export type ReservationArrivalStatus = 'pending' | 'arrived' | 'queued' | 'served'
+export type ReservationArrivalStatus = 'pending' | 'arrived' | 'late' | 'queued' | 'served' | 'no-show'
 export type ReservationSource = 'cycle' | 'manual'
 export type NotificationType = 'call' | 'device-free' | 'vip-insert' | 'disinfection-due' | 'reservation-reminder'
 
@@ -27,6 +27,7 @@ export interface DisinfectionRecord {
   method: DisinfectionMethod
   timestamp: string
   nextDue: string
+  queueEntryId: string
 }
 
 export interface CycleRule {
@@ -138,8 +139,10 @@ export const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
 export const RESERVATION_ARRIVAL_LABELS: Record<ReservationArrivalStatus, string> = {
   pending: '未到店',
   arrived: '已到店',
+  late: '迟到',
   queued: '已入队',
   served: '服务完成',
+  'no-show': '爽约',
 }
 
 export const DAY_OF_WEEK_LABELS: Record<number, string> = {

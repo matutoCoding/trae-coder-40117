@@ -9,9 +9,10 @@ interface DisinfectionModalProps {
   deviceId: string
   open: boolean
   onClose: () => void
+  queueEntryId?: string
 }
 
-export default function DisinfectionModal({ deviceId, open, onClose }: DisinfectionModalProps) {
+export default function DisinfectionModal({ deviceId, open, onClose, queueEntryId = '' }: DisinfectionModalProps) {
   const [method, setMethod] = useState<DisinfectionMethod>('UV')
   const [operator, setOperator] = useState('')
   const addDisinfectionRecord = useDeviceStore((s) => s.addDisinfectionRecord)
@@ -26,6 +27,7 @@ export default function DisinfectionModal({ deviceId, open, onClose }: Disinfect
       operator: operator.trim(),
       timestamp: new Date().toISOString(),
       nextDue: new Date(Date.now() + 3600000).toISOString(),
+      queueEntryId,
     })
     setOperator('')
     setMethod('UV')
