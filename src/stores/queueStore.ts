@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { QueueEntry, QueuePriority, Notification, NotificationType, Device } from '@/types'
+import type { QueueEntry, QueuePriority, Notification, NotificationType } from '@/types'
 import { PRIORITY_VALUES } from '@/types'
 
 const generateId = () => crypto.randomUUID()
@@ -14,11 +14,19 @@ function findMaxTicketNumber(entries: QueueEntry[]): number {
   return max
 }
 
+const emptyEntry = {
+  calledAt: '',
+  completedAt: '',
+  completionType: '' as const,
+  operator: '',
+  reservationId: '',
+}
+
 const SAMPLE_QUEUE: QueueEntry[] = [
-  { id: 'q1', memberId: 'm1', priority: 'normal', priorityValue: 0, ticketNumber: 'A001', status: 'waiting', createdAt: new Date(Date.now() - 3600000).toISOString(), deviceId: '', reason: '' },
-  { id: 'q2', memberId: 'm4', priority: 'normal', priorityValue: 0, ticketNumber: 'A002', status: 'waiting', createdAt: new Date(Date.now() - 2400000).toISOString(), deviceId: '', reason: '' },
-  { id: 'q3', memberId: 'm2', priority: 'vip', priorityValue: 50, ticketNumber: 'A003', status: 'waiting', createdAt: new Date(Date.now() - 1800000).toISOString(), deviceId: '', reason: '' },
-  { id: 'q4', memberId: 'm5', priority: 'normal', priorityValue: 0, ticketNumber: 'A004', status: 'waiting', createdAt: new Date(Date.now() - 900000).toISOString(), deviceId: '', reason: '' },
+  { id: 'q1', memberId: 'm1', priority: 'normal', priorityValue: 0, ticketNumber: 'A001', status: 'waiting', createdAt: new Date(Date.now() - 3600000).toISOString(), deviceId: '', reason: '', ...emptyEntry },
+  { id: 'q2', memberId: 'm4', priority: 'normal', priorityValue: 0, ticketNumber: 'A002', status: 'waiting', createdAt: new Date(Date.now() - 2400000).toISOString(), deviceId: '', reason: '', ...emptyEntry },
+  { id: 'q3', memberId: 'm2', priority: 'vip', priorityValue: 50, ticketNumber: 'A003', status: 'waiting', createdAt: new Date(Date.now() - 1800000).toISOString(), deviceId: '', reason: '', ...emptyEntry },
+  { id: 'q4', memberId: 'm5', priority: 'normal', priorityValue: 0, ticketNumber: 'A004', status: 'waiting', createdAt: new Date(Date.now() - 900000).toISOString(), deviceId: '', reason: '', ...emptyEntry },
 ]
 
 const SAMPLE_NOTIFICATIONS: Notification[] = [
@@ -34,14 +42,16 @@ interface QueueState {
   ticketCounter: number
   lastTicketPrefix: string
 
-  takeNumber: (memberId: string, priority?: QueuePriority, reason?: string, deviceId?: string) => QueueEntry
+  takeNumber: (memberId: string, priority?: QueuePriority, reason?: string, deviceId?: string, operator?: string, reservationId?: string) => QueueEntry
   callNext: (deviceId: string) => QueueEntry | null
   skipCurrent: () => void
   recallCurrent: () => void
-  completeCurrent: (deviceStatus?: 'idle' | 'disinfecting') => void
-  vipInsert: (memberId: string, reason: string) => QueueEntry
-  emergencyInsert: (memberId: string, reason: string) => QueueEntry
+  completeCurrent: (completionType: 'idle' | 'disinfecting') => void
+  vipInsert: (memberId: string, reason: string, operator?: string) => QueueEntry
+  emergencyInsert: (memberId: string, reason: string, operator?: string) => QueueEntry
+  checkIn: (memberId: string, reservationId: string, operator?: string) => QueueEntry
   getSortedQueue: () => QueueEntry[]
+  getAllQueue: () => QueueEntry[]
   getWaitingCount: () => number
   getQueuePosition: (ticketNumber: string) => number
   generateTicketNumber: () => string
@@ -77,7 +87,7 @@ export const useQueueStore = create<QueueState>()(
         }
       },
 
-      takeNumber: (memberId, priority = 'normal', reason = '', deviceId = '') => {
+      takeNumber: (memberId, priority = 'normal', reason = '', deviceId = '', operator = '', reservationId = '') => {
         get().initTicketCounter()
         const ticketNumber = get().generateTicketNumber()
         const entry: QueueEntry = {
@@ -90,6 +100,9 @@ export const useQueueStore = create<QueueState>()(
           createdAt: new Date().toISOString(),
           deviceId,
           reason,
+          ...emptyEntry,
+          operator,
+          reservationId,
         }
         set((state) => ({
           queue: [...state.queue, entry],
@@ -104,7 +117,12 @@ export const useQueueStore = create<QueueState>()(
         const next = sorted[0]
         if (!next) return null
 
-        const updatedEntry: QueueEntry = { ...next, status: 'serving', deviceId }
+        const updatedEntry: QueueEntry = {
+          ...next,
+          status: 'serving',
+          deviceId,
+          calledAt: new Date().toISOString(),
+        }
 
         set((state) => ({
           queue: state.queue.map((e) =>
@@ -121,7 +139,9 @@ export const useQueueStore = create<QueueState>()(
         if (!current) return
         set((state) => ({
           queue: state.queue.map((e) =>
-            e.id === current.id ? { ...e, status: 'skipped' as const, deviceId: '' } : e
+            e.id === current.id
+              ? { ...e, status: 'skipped' as const, deviceId: '', completedAt: new Date().toISOString(), completionType: '' as const }
+              : e
           ),
           currentServing: null,
         }))
@@ -133,33 +153,50 @@ export const useQueueStore = create<QueueState>()(
         get().addNotification('call', `再次呼叫 ${current.ticketNumber} 号`)
       },
 
-      completeCurrent: (deviceStatus = 'idle') => {
+      completeCurrent: (completionType = 'idle') => {
         const current = get().currentServing
         if (!current) return
         set((state) => ({
           queue: state.queue.map((e) =>
-            e.id === current.id ? { ...e, status: 'completed' as const } : e
+            e.id === current.id
+              ? { ...e, status: 'completed' as const, completedAt: new Date().toISOString(), completionType }
+              : e
           ),
           currentServing: null,
         }))
-        get().addNotification('device-free', `${current.ticketNumber} 号已完成，设备 ${deviceStatus === 'disinfecting' ? '待消毒' : '空闲'}`)
+        get().addNotification('device-free', `${current.ticketNumber} 号已完成，设备${completionType === 'disinfecting' ? '待消毒' : '已空闲'}`)
       },
 
-      vipInsert: (memberId, reason) => {
-        const entry = get().takeNumber(memberId, 'vip', reason)
+      vipInsert: (memberId, reason, operator = '') => {
+        const entry = get().takeNumber(memberId, 'vip', reason, '', operator)
         get().addNotification('vip-insert', `VIP会员已优先排队 ${entry.ticketNumber}`)
         return entry
       },
 
-      emergencyInsert: (memberId, reason) => {
-        const entry = get().takeNumber(memberId, 'emergency', reason)
+      emergencyInsert: (memberId, reason, operator = '') => {
+        const entry = get().takeNumber(memberId, 'emergency', reason, '', operator)
         get().addNotification('vip-insert', `应急通道 ${entry.ticketNumber} 已插入队首`)
+        return entry
+      },
+
+      checkIn: (memberId, reservationId, operator = '') => {
+        const entry = get().takeNumber(memberId, 'normal', '预约签到', '', operator, reservationId)
+        get().addNotification('reservation-reminder', `会员已签到入队 ${entry.ticketNumber}`)
         return entry
       },
 
       getSortedQueue: () => {
         return get()
           .queue.filter((e) => e.status === 'waiting')
+          .sort((a, b) => {
+            if (b.priorityValue !== a.priorityValue) return b.priorityValue - a.priorityValue
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          })
+      },
+
+      getAllQueue: () => {
+        return get()
+          .queue.slice()
           .sort((a, b) => {
             if (b.priorityValue !== a.priorityValue) return b.priorityValue - a.priorityValue
             return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -199,7 +236,7 @@ export const useQueueStore = create<QueueState>()(
 
       getUnreadCount: () => get().notifications.filter((n) => !n.read).length,
     }),
-    { 
+    {
       name: 'vr-queue-store',
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -207,6 +244,10 @@ export const useQueueStore = create<QueueState>()(
           if (maxNum > state.ticketCounter) {
             state.ticketCounter = maxNum
           }
+          state.queue = state.queue.map((e) => ({
+            ...emptyEntry,
+            ...e,
+          }))
         }
       },
     }

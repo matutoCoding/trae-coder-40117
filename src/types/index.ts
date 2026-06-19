@@ -62,6 +62,11 @@ export interface QueueEntry {
   createdAt: string
   deviceId: string
   reason: string
+  calledAt: string
+  completedAt: string
+  completionType: '' | 'idle' | 'disinfecting'
+  operator: string
+  reservationId: string
 }
 
 export interface Member {

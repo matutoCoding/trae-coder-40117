@@ -17,9 +17,10 @@ import {
   Calendar,
   Filter,
   CheckCircle2,
+  Monitor,
 } from 'lucide-react'
 
-type TabType = 'rules' | 'reservations'
+type TabType = 'rules' | 'reservations' | 'calendar'
 type DateFilter = 'today' | 'week' | 'all'
 type FormStep = 1 | 2 | 3 | 4
 
@@ -55,6 +56,8 @@ export default function Reservations() {
   const [timeError, setTimeError] = useState('')
   const [dateError, setDateError] = useState('')
   const [adjustError, setAdjustError] = useState('')
+  const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split('T')[0])
+  const [calendarDeviceId, setCalendarDeviceId] = useState('')
 
   const { cycleRules, reservations, addCycleRule, toggleCycleRule, cancelReservation, updateReservation, hasConflict } = useReservationStore()
   const { devices } = useDeviceStore()
@@ -193,18 +196,18 @@ export default function Reservations() {
         </h1>
 
         <div className="mb-8 flex gap-1 rounded-lg bg-[#141B2D] p-1">
-          {(['rules', 'reservations'] as TabType[]).map((tab) => (
+          {(['rules', 'reservations', 'calendar'] as TabType[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn(
-                'flex-1 rounded-md px-6 py-2.5 text-sm font-medium transition-all',
+                'flex-1 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
                 activeTab === tab
                   ? 'bg-gradient-to-r from-[#00F0FF]/20 to-[#FF2D78]/20 text-[#00F0FF] shadow-[0_0_12px_rgba(0,240,255,0.2)]'
                   : 'text-gray-500 hover:text-gray-300'
               )}
             >
-              {tab === 'rules' ? '周期规则' : '预约管理'}
+              {tab === 'rules' ? '周期规则' : tab === 'reservations' ? '预约管理' : '日历排期'}
             </button>
           ))}
         </div>
@@ -665,6 +668,120 @@ export default function Reservations() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'calendar' && (
+          <div>
+            <div className="mb-4 flex items-center gap-3">
+              <input
+                type="date"
+                value={calendarDate}
+                onChange={(e) => setCalendarDate(e.target.value)}
+                className="rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-3 py-2 text-sm text-white outline-none focus:border-[#00F0FF]"
+              />
+              <select
+                value={calendarDeviceId}
+                onChange={(e) => setCalendarDeviceId(e.target.value)}
+                className="rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-3 py-2 text-sm text-white outline-none focus:border-[#00F0FF]"
+              >
+                <option value="">全部设备</option>
+                {devices.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-4">
+              {(calendarDeviceId ? devices.filter((d) => d.id === calendarDeviceId) : devices).map((device) => {
+                const deviceReservations = reservations.filter(
+                  (r) => r.deviceId === device.id && r.date === calendarDate && r.status !== 'cancelled'
+                )
+                const timeSlots = []
+                for (let h = 9; h <= 21; h++) {
+                  timeSlots.push(`${String(h).padStart(2, '0')}:00`)
+                }
+
+                return (
+                  <div key={device.id} className="rounded-xl border border-[#00F0FF]/10 bg-[#141B2D] p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Monitor size={16} className="text-[#00F0FF]" />
+                      <span className="font-medium text-white">{device.name}</span>
+                      <span className="text-xs text-gray-500">{device.specs}</span>
+                    </div>
+                    <div className="flex gap-0.5 overflow-x-auto pb-2">
+                      {timeSlots.map((time) => {
+                        const hour = parseInt(time.split(':')[0])
+                        const slotEnd = `${String(hour + 1).padStart(2, '0')}:00`
+                        const slotRes = deviceReservations.find(
+                          (r) => r.startTime < slotEnd && r.endTime > time
+                        )
+                        const isConflict = slotRes?.status === 'conflict'
+                        return (
+                          <div key={time} className="flex min-w-[52px] flex-col items-center gap-1">
+                            <span className="text-[10px] text-gray-600">{time}</span>
+                            <div
+                              className={cn(
+                                'h-8 w-full rounded-sm transition-all',
+                                isConflict
+                                  ? 'bg-[#FF2D78]/50 shadow-[0_0_6px_rgba(255,45,120,0.3)]'
+                                  : slotRes
+                                  ? 'bg-gradient-to-b from-[#00F0FF]/40 to-[#FF2D78]/40'
+                                  : 'bg-white/5'
+                              )}
+                            />
+                            {slotRes && (
+                              <span className={cn(
+                                'max-w-[48px] truncate text-[9px]',
+                                isConflict ? 'text-[#FF2D78]' : 'text-[#00F0FF]'
+                              )}>
+                                {getMemberName(slotRes.memberId)}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {deviceReservations.length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        {deviceReservations.map((r) => (
+                          <div
+                            key={r.id}
+                            className={cn(
+                              'flex items-center justify-between rounded-lg border px-3 py-2',
+                              r.status === 'conflict'
+                                ? 'border-[#FF2D78]/30 bg-[#FF2D78]/5'
+                                : 'border-[#00F0FF]/20 bg-[#0A0E1A]'
+                            )}
+                          >
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className={cn(
+                                'rounded-full px-2 py-0.5 text-xs font-medium',
+                                r.status === 'conflict'
+                                  ? 'bg-[#FF2D78]/20 text-[#FF2D78]'
+                                  : 'bg-[#00F0FF]/20 text-[#00F0FF]'
+                              )}>
+                                {r.startTime}-{r.endTime}
+                              </span>
+                              <span className="text-white">{getMemberName(r.memberId)}</span>
+                            </div>
+                            <span className={cn(
+                              'text-xs',
+                              r.status === 'conflict' ? 'text-[#FF2D78]' : 'text-gray-500'
+                            )}>
+                              {RESERVATION_STATUS_LABELS[r.status]}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {deviceReservations.length === 0 && (
+                      <p className="mt-2 text-xs text-gray-600">当日无预约</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

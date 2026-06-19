@@ -53,7 +53,7 @@ export const useDeviceStore = create<DeviceState>()(
         set((state) => {
           const updatedDevices = state.devices.map((d) =>
             d.id === record.deviceId
-              ? { ...d, lastDisinfection: record.timestamp, status: 'disinfecting' as const }
+              ? { ...d, lastDisinfection: record.timestamp, status: 'idle' as const }
               : d
           )
           return {
