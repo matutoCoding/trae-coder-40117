@@ -24,6 +24,10 @@ import {
   Clock,
   User,
   ShieldCheck,
+  Info,
+  MapPin,
+  FileText,
+  Calendar,
 } from 'lucide-react'
 
 type InsertType = 'vip' | 'emergency' | null
@@ -59,6 +63,7 @@ export default function Queue() {
   const [showCheckIn, setShowCheckIn] = useState(false)
   const [checkInMemberId, setCheckInMemberId] = useState('')
   const [currentAdminId] = useState('m6')
+  const [selectedRecord, setSelectedRecord] = useState<QueueEntry | null>(null)
 
   const {
     currentServing,
@@ -76,7 +81,7 @@ export default function Queue() {
 
   const { members, getMemberById } = useMemberStore()
   const { devices, updateDeviceStatus } = useDeviceStore()
-  const { getReservationsByMember, reservations } = useReservationStore()
+  const { getReservationsByMember, reservations, checkInReservation, updateReservationArrival, getReservationById } = useReservationStore()
 
   const sortedQueue = getSortedQueue()
   const allQueue = getAllQueue()
@@ -104,7 +109,7 @@ export default function Queue() {
     return members.filter((m) => {
       if (m.role === 'admin') return false
       const memberRes = getReservationsByMember(m.id).filter(
-        (r) => r.date === today && r.status === 'confirmed'
+        (r) => r.date === today && r.status === 'confirmed' && r.arrivalStatus === 'pending'
       )
       return memberRes.length > 0
     })
@@ -113,7 +118,7 @@ export default function Queue() {
   const getTodayReservations = (memberId: string) => {
     const today = new Date().toISOString().split('T')[0]
     return getReservationsByMember(memberId).filter(
-      (r) => r.date === today && r.status === 'confirmed'
+      (r) => r.date === today && r.status === 'confirmed' && r.arrivalStatus === 'pending'
     )
   }
 
@@ -185,6 +190,9 @@ export default function Queue() {
   const handleComplete = (completionType: 'idle' | 'disinfecting') => {
     if (!currentServing) return
     const deviceId = currentServing.deviceId
+    if (currentServing.reservationId) {
+      updateReservationArrival(currentServing.reservationId, 'served')
+    }
     completeCurrent(completionType)
     if (deviceId) {
       updateDeviceStatus(deviceId, completionType)
@@ -202,7 +210,8 @@ export default function Queue() {
 
   const handleCheckIn = (memberId: string, reservationId: string) => {
     const operatorName = getMemberName(currentAdminId)
-    checkIn(memberId, reservationId, operatorName)
+    const entry = checkIn(memberId, reservationId, operatorName)
+    checkInReservation(reservationId, entry.id)
     setShowCheckIn(false)
     setCheckInMemberId('')
   }
@@ -386,15 +395,17 @@ export default function Queue() {
               {filteredRecords.map((entry) => (
                 <div
                   key={entry.id}
+                  onClick={() => setSelectedRecord(entry)}
                   className={cn(
-                    'rounded-lg border bg-[#141B2D] p-4 transition-all',
+                    'cursor-pointer rounded-lg border bg-[#141B2D] p-4 transition-all',
                     entry.status === 'serving'
                       ? 'border-[#00F0FF]/40 shadow-[0_0_12px_rgba(0,240,255,0.15)]'
                       : entry.status === 'waiting'
                       ? 'border-[#00F0FF]/20'
                       : entry.status === 'completed'
                       ? 'border-green-500/20'
-                      : 'border-gray-700'
+                      : 'border-gray-700',
+                    'hover:border-[#00F0FF]/60'
                   )}
                 >
                   <div className="flex items-center justify-between">
@@ -479,6 +490,124 @@ export default function Queue() {
           </div>
         )}
       </div>
+
+      {selectedRecord && (() => {
+        const res = selectedRecord.reservationId ? getReservationById(selectedRecord.reservationId) : undefined
+        const timeline: { icon: any; label: string; time: string; color: string }[] = []
+        timeline.push({ icon: ClipboardList, label: '取号', time: selectedRecord.createdAt, color: 'text-[#00F0FF]' })
+        if (selectedRecord.calledAt) {
+          timeline.push({ icon: Mic, label: `叫号 · ${getDeviceName(selectedRecord.deviceId)}`, time: selectedRecord.calledAt, color: 'text-yellow-400' })
+        }
+        if (selectedRecord.status === 'serving' && selectedRecord.calledAt) {
+          timeline.push({ icon: Monitor, label: '服务中', time: selectedRecord.calledAt, color: 'text-[#00FF88]' })
+        }
+        if (selectedRecord.status === 'skipped' && selectedRecord.completedAt) {
+          timeline.push({ icon: SkipForward, label: '跳号', time: selectedRecord.completedAt, color: 'text-yellow-400' })
+        }
+        if (selectedRecord.status === 'completed') {
+          timeline.push({ icon: CheckCircle, label: `完成服务 · ${COMPLETION_TYPE_LABELS[selectedRecord.completionType]}`, time: selectedRecord.completedAt, color: 'text-green-400' })
+          if (selectedRecord.completionType === 'disinfecting') {
+            const device = devices.find((d) => d.id === selectedRecord.deviceId)
+            if (device && device.status === 'idle' && device.lastDisinfection) {
+              timeline.push({ icon: ShieldCheck, label: '消毒登记完成', time: device.lastDisinfection, color: 'text-green-400' })
+            } else {
+              timeline.push({ icon: ShieldCheck, label: '待消毒登记', time: '', color: 'text-[#FF2D78]' })
+            }
+          }
+        }
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center">
+            <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-[#00F0FF]/30 bg-[#0A0E1A] p-5 sm:rounded-2xl">
+              <div className="mb-4 flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      'font-mono text-2xl font-bold',
+                      selectedRecord.priority === 'emergency' ? 'text-[#FF2D78]' :
+                      selectedRecord.priority === 'vip' ? 'text-yellow-400' : 'text-[#00F0FF]'
+                    )}>
+                      {selectedRecord.ticketNumber}
+                    </span>
+                    <span className={cn(
+                      'rounded-full px-2 py-0.5 text-xs font-medium',
+                      selectedRecord.status === 'serving' ? 'bg-[#00F0FF]/20 text-[#00F0FF]' :
+                      selectedRecord.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                      selectedRecord.status === 'skipped' ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    )}>
+                      {selectedRecord.status === 'waiting' ? '等待中' :
+                       selectedRecord.status === 'serving' ? '服务中' :
+                       selectedRecord.status === 'completed' ? '已完成' : '跳号'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-white">{getMemberName(selectedRecord.memberId)}</p>
+                </div>
+                <button onClick={() => setSelectedRecord(null)} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+
+              {res && (
+                <div className="mb-4 rounded-lg border border-[#00FF88]/20 bg-[#00FF88]/5 p-3">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[#00FF88]">
+                    <Calendar size={12} /> 关联预约
+                  </div>
+                  <div className="space-y-1 text-xs text-gray-300">
+                    <div><span className="text-gray-500">日期：</span>{res.date}</div>
+                    <div><span className="text-gray-500">时段：</span>{res.startTime} - {res.endTime}</div>
+                    <div><span className="text-gray-500">设备：</span>{getDeviceName(res.deviceId)}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-4 rounded-lg border border-white/5 bg-white/2 p-3">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-gray-500">分配设备</span>
+                    <p className="mt-0.5 text-white">{selectedRecord.deviceId ? getDeviceName(selectedRecord.deviceId) : '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">优先级</span>
+                    <p className="mt-0.5 text-white">{QUEUE_PRIORITY_LABELS[selectedRecord.priority]}</p>
+                  </div>
+                  {selectedRecord.reason && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">原因</span>
+                      <p className="mt-0.5 text-white">{selectedRecord.reason}</p>
+                    </div>
+                  )}
+                  {selectedRecord.operator && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">处理人</span>
+                      <p className="mt-0.5 text-white">{selectedRecord.operator}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-3 text-sm font-medium text-white">服务时间线</div>
+                <div className="relative space-y-0">
+                  {timeline.map((t, idx) => (
+                    <div key={idx} className="flex gap-3 pb-4 last:pb-0">
+                      <div className="flex flex-col items-center">
+                        <div className={cn('flex h-7 w-7 items-center justify-center rounded-full bg-[#141B2D] border border-white/10', t.color)}>
+                          <t.icon size={13} />
+                        </div>
+                        {idx < timeline.length - 1 && <div className="mt-1 w-px flex-1 bg-white/10" />}
+                      </div>
+                      <div className="flex-1 pt-1">
+                        <div className={cn('text-sm font-medium', t.color)}>{t.label}</div>
+                        {t.time && <div className="text-xs text-gray-500">{formatTime(t.time)}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {ticketAnimation && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">

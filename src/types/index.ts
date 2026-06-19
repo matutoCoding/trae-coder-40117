@@ -6,6 +6,7 @@ export type VipLevel = 'none' | 'silver' | 'gold' | 'platinum'
 export type QueuePriority = 'normal' | 'vip' | 'emergency'
 export type QueueEntryStatus = 'waiting' | 'serving' | 'skipped' | 'completed'
 export type ReservationStatus = 'confirmed' | 'cancelled' | 'completed' | 'conflict'
+export type ReservationArrivalStatus = 'pending' | 'arrived' | 'queued' | 'served'
 export type ReservationSource = 'cycle' | 'manual'
 export type NotificationType = 'call' | 'device-free' | 'vip-insert' | 'disinfection-due' | 'reservation-reminder'
 
@@ -50,6 +51,9 @@ export interface Reservation {
   endTime: string
   status: ReservationStatus
   source: ReservationSource
+  arrivalStatus: ReservationArrivalStatus
+  queueEntryId: string
+  checkedInAt: string
 }
 
 export interface QueueEntry {
@@ -129,6 +133,13 @@ export const RESERVATION_STATUS_LABELS: Record<ReservationStatus, string> = {
   cancelled: '已取消',
   completed: '已完成',
   conflict: '冲突',
+}
+
+export const RESERVATION_ARRIVAL_LABELS: Record<ReservationArrivalStatus, string> = {
+  pending: '未到店',
+  arrived: '已到店',
+  queued: '已入队',
+  served: '服务完成',
 }
 
 export const DAY_OF_WEEK_LABELS: Record<number, string> = {

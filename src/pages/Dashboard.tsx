@@ -7,6 +7,10 @@ import {
   Users,
   SprayCan,
   ChevronRight,
+  Activity,
+  AlertTriangle,
+  UserCheck,
+  Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -35,8 +39,57 @@ export default function Dashboard() {
   const inUseDevices = devices.filter((d) => d.status === 'in-use').length
   const disinfectingDevices = devices.filter((d) => d.status === 'disinfecting').length
 
+  const conflictReservationsToday = todayReservations.filter((r) => r.status === 'conflict').length
+  const arrivedToday = todayReservations.filter((r) =>
+    r.arrivalStatus === 'queued' || r.arrivalStatus === 'arrived' || r.arrivalStatus === 'served'
+  ).length
+  const arrivalRate = todayReservations.length > 0 ? Math.round((arrivedToday / todayReservations.length) * 100) : 0
+
   const getDeviceName = (id: string) => devices.find((d) => d.id === id)?.name ?? '未知设备'
   const getMemberName = (id: string) => getMemberById(id)?.name ?? '未知会员'
+
+  const opsStats = [
+    {
+      label: '到店率',
+      value: `${arrivalRate}%`,
+      sub: `${arrivedToday}/${todayReservations.length}`,
+      color: '#00FF88',
+      icon: UserCheck,
+      onClick: () => navigate('/reservations', { state: { tab: 'reservations' } }),
+    },
+    {
+      label: '等待人数',
+      value: waitingCount,
+      sub: waitingCount > 0 ? `下1位 ${sortedQueue[0]?.ticketNumber ?? ''}` : '无等待',
+      color: '#FF2D78',
+      icon: Clock,
+      onClick: () => navigate('/queue', { state: { tab: 'queue' } }),
+    },
+    {
+      label: '服务中设备',
+      value: inUseDevices,
+      sub: inUseDevices > 0 && currentServing ? getDeviceName(currentServing.deviceId) : '无运行',
+      color: '#00F0FF',
+      icon: Activity,
+      onClick: () => navigate('/devices'),
+    },
+    {
+      label: '待消毒',
+      value: disinfectingDevices,
+      sub: disinfectingDevices > 0 ? '需登记消毒' : '已就绪',
+      color: '#a855f7',
+      icon: SprayCan,
+      onClick: () => navigate('/devices'),
+    },
+    {
+      label: '冲突预约',
+      value: conflictReservationsToday,
+      sub: conflictReservationsToday > 0 ? '需尽快处理' : '无冲突',
+      color: '#f59e0b',
+      icon: AlertTriangle,
+      onClick: () => navigate('/reservations', { state: { tab: 'reservations' } }),
+    },
+  ]
 
   const statCards = [
     { label: '设备总数', value: totalDevices, color: '#00F0FF' },
@@ -124,6 +177,37 @@ export default function Dashboard() {
                   {card.value}
                 </div>
                 <div className="mt-1 text-xs text-gray-500 group-hover:text-gray-400">{card.label}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mb-6">
+          <h2 className="mb-3 text-sm font-medium text-gray-400">今日运营概览</h2>
+          <div className="grid grid-cols-5 gap-2">
+            {opsStats.map((card) => (
+              <button
+                key={card.label}
+                onClick={card.onClick}
+                className="group flex flex-col items-center rounded-xl border border-white/5 bg-[#0d1220] p-2.5 transition hover:border-white/15 hover:bg-[#0f1628]"
+              >
+                <div
+                  className="mb-1.5 flex h-8 w-8 items-center justify-center rounded-lg"
+                  style={{
+                    backgroundColor: `${card.color}15`,
+                    border: `1px solid ${card.color}30`,
+                  }}
+                >
+                  <card.icon size={15} style={{ color: card.color }} />
+                </div>
+                <div
+                  className="text-lg font-bold tabular-nums"
+                  style={{ color: card.color, textShadow: `0 0 12px ${card.color}40` }}
+                >
+                  {card.value}
+                </div>
+                <div className="mt-0.5 text-[10px] text-gray-500">{card.label}</div>
+                <div className="mt-0.5 text-[9px] text-gray-600">{card.sub}</div>
               </button>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { CycleRule, Reservation } from '@/types'
-import { DAY_OF_WEEK_LABELS, RESERVATION_STATUS_LABELS } from '@/types'
+import { DAY_OF_WEEK_LABELS, RESERVATION_STATUS_LABELS, RESERVATION_ARRIVAL_LABELS } from '@/types'
 import { useReservationStore } from '@/stores/reservationStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useMemberStore } from '@/stores/memberStore'
@@ -558,6 +558,22 @@ export default function Reservations() {
                       >
                         {RESERVATION_STATUS_LABELS[r.status]}
                       </span>
+                      {r.status !== 'cancelled' && (
+                        <span
+                          className={cn(
+                            'rounded-full px-2 py-0.5 text-xs font-medium',
+                            r.arrivalStatus === 'served'
+                              ? 'bg-green-500/20 text-green-400'
+                              : r.arrivalStatus === 'queued'
+                              ? 'bg-[#00FF88]/20 text-[#00FF88]'
+                              : r.arrivalStatus === 'arrived'
+                              ? 'bg-yellow-500/20 text-yellow-400'
+                              : 'bg-gray-600/20 text-gray-500'
+                          )}
+                        >
+                          {RESERVATION_ARRIVAL_LABELS[r.arrivalStatus]}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {(r.status === 'conflict' || r.status === 'confirmed') && (
@@ -764,6 +780,20 @@ export default function Reservations() {
                                 {r.startTime}-{r.endTime}
                               </span>
                               <span className="text-white">{getMemberName(r.memberId)}</span>
+                              <span
+                                className={cn(
+                                  'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                                  r.arrivalStatus === 'served'
+                                    ? 'bg-green-500/20 text-green-400'
+                                    : r.arrivalStatus === 'queued'
+                                    ? 'bg-[#00FF88]/20 text-[#00FF88]'
+                                    : r.arrivalStatus === 'arrived'
+                                    ? 'bg-yellow-500/20 text-yellow-400'
+                                    : 'bg-gray-600/20 text-gray-500'
+                                )}
+                              >
+                                {RESERVATION_ARRIVAL_LABELS[r.arrivalStatus]}
+                              </span>
                             </div>
                             <span className={cn(
                               'text-xs',

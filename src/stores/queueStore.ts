@@ -140,7 +140,7 @@ export const useQueueStore = create<QueueState>()(
         set((state) => ({
           queue: state.queue.map((e) =>
             e.id === current.id
-              ? { ...e, status: 'skipped' as const, deviceId: '', completedAt: new Date().toISOString(), completionType: '' as const }
+              ? { ...e, status: 'skipped' as const, completedAt: new Date().toISOString(), completionType: '' as const }
               : e
           ),
           currentServing: null,
