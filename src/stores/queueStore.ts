@@ -1,14 +1,17 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { QueueEntry, QueuePriority, Notification, NotificationType } from '@/types'
+import type { QueueEntry, QueuePriority, Notification, NotificationType, Device } from '@/types'
 import { PRIORITY_VALUES } from '@/types'
 
 const generateId = () => crypto.randomUUID()
 
-let ticketCounter = 0
-const generateTicketNumber = () => {
-  ticketCounter++
-  return `A${String(ticketCounter).padStart(3, '0')}`
+function findMaxTicketNumber(entries: QueueEntry[]): number {
+  let max = 0
+  entries.forEach((e) => {
+    const num = parseInt(e.ticketNumber.replace(/^[A-Za-z]/, ''), 10)
+    if (num > max) max = num
+  })
+  return max
 }
 
 const SAMPLE_QUEUE: QueueEntry[] = [
@@ -17,8 +20,6 @@ const SAMPLE_QUEUE: QueueEntry[] = [
   { id: 'q3', memberId: 'm2', priority: 'vip', priorityValue: 50, ticketNumber: 'A003', status: 'waiting', createdAt: new Date(Date.now() - 1800000).toISOString(), deviceId: '', reason: '' },
   { id: 'q4', memberId: 'm5', priority: 'normal', priorityValue: 0, ticketNumber: 'A004', status: 'waiting', createdAt: new Date(Date.now() - 900000).toISOString(), deviceId: '', reason: '' },
 ]
-
-ticketCounter = 4
 
 const SAMPLE_NOTIFICATIONS: Notification[] = [
   { id: 'n1', type: 'call', message: '请 A003 号到 VR-01 设备', timestamp: new Date(Date.now() - 60000).toISOString(), read: false },
@@ -31,17 +32,20 @@ interface QueueState {
   notifications: Notification[]
   currentServing: QueueEntry | null
   ticketCounter: number
+  lastTicketPrefix: string
 
   takeNumber: (memberId: string, priority?: QueuePriority, reason?: string, deviceId?: string) => QueueEntry
-  callNext: () => QueueEntry | null
+  callNext: (deviceId: string) => QueueEntry | null
   skipCurrent: () => void
   recallCurrent: () => void
-  completeCurrent: () => void
+  completeCurrent: (deviceStatus?: 'idle' | 'disinfecting') => void
   vipInsert: (memberId: string, reason: string) => QueueEntry
   emergencyInsert: (memberId: string, reason: string) => QueueEntry
   getSortedQueue: () => QueueEntry[]
   getWaitingCount: () => number
   getQueuePosition: (ticketNumber: string) => number
+  generateTicketNumber: () => string
+  initTicketCounter: () => void
 
   addNotification: (type: NotificationType, message: string) => void
   markNotificationRead: (id: string) => void
@@ -56,9 +60,26 @@ export const useQueueStore = create<QueueState>()(
       notifications: SAMPLE_NOTIFICATIONS,
       currentServing: null,
       ticketCounter: 4,
+      lastTicketPrefix: 'A',
+
+      generateTicketNumber: () => {
+        const state = get()
+        const next = state.ticketCounter + 1
+        set({ ticketCounter: next })
+        return `${state.lastTicketPrefix}${String(next).padStart(3, '0')}`
+      },
+
+      initTicketCounter: () => {
+        const state = get()
+        const maxNum = findMaxTicketNumber(state.queue)
+        if (maxNum > state.ticketCounter) {
+          set({ ticketCounter: maxNum })
+        }
+      },
 
       takeNumber: (memberId, priority = 'normal', reason = '', deviceId = '') => {
-        const ticketNumber = generateTicketNumber()
+        get().initTicketCounter()
+        const ticketNumber = get().generateTicketNumber()
         const entry: QueueEntry = {
           id: generateId(),
           memberId,
@@ -72,25 +93,27 @@ export const useQueueStore = create<QueueState>()(
         }
         set((state) => ({
           queue: [...state.queue, entry],
-          ticketCounter: state.ticketCounter + 1,
         }))
-        get().addNotification('call', `${ticketNumber} 号已取号，前方等待 ${get().getWaitingCount()} 人`)
+        const pos = get().getQueuePosition(ticketNumber)
+        get().addNotification('call', `${ticketNumber} 号已取号，前方等待 ${Math.max(0, pos - 1)} 人`)
         return entry
       },
 
-      callNext: () => {
+      callNext: (deviceId) => {
         const sorted = get().getSortedQueue()
         const next = sorted[0]
         if (!next) return null
 
+        const updatedEntry: QueueEntry = { ...next, status: 'serving', deviceId }
+
         set((state) => ({
           queue: state.queue.map((e) =>
-            e.id === next.id ? { ...e, status: 'serving' as const } : e
+            e.id === next.id ? updatedEntry : e
           ),
-          currentServing: { ...next, status: 'serving' },
+          currentServing: updatedEntry,
         }))
         get().addNotification('call', `请 ${next.ticketNumber} 号到设备使用`)
-        return next
+        return updatedEntry
       },
 
       skipCurrent: () => {
@@ -98,7 +121,7 @@ export const useQueueStore = create<QueueState>()(
         if (!current) return
         set((state) => ({
           queue: state.queue.map((e) =>
-            e.id === current.id ? { ...e, status: 'skipped' as const } : e
+            e.id === current.id ? { ...e, status: 'skipped' as const, deviceId: '' } : e
           ),
           currentServing: null,
         }))
@@ -110,7 +133,7 @@ export const useQueueStore = create<QueueState>()(
         get().addNotification('call', `再次呼叫 ${current.ticketNumber} 号`)
       },
 
-      completeCurrent: () => {
+      completeCurrent: (deviceStatus = 'idle') => {
         const current = get().currentServing
         if (!current) return
         set((state) => ({
@@ -119,7 +142,7 @@ export const useQueueStore = create<QueueState>()(
           ),
           currentServing: null,
         }))
-        get().addNotification('device-free', `${current.ticketNumber} 号已完成，设备空闲`)
+        get().addNotification('device-free', `${current.ticketNumber} 号已完成，设备 ${deviceStatus === 'disinfecting' ? '待消毒' : '空闲'}`)
       },
 
       vipInsert: (memberId, reason) => {
@@ -176,6 +199,16 @@ export const useQueueStore = create<QueueState>()(
 
       getUnreadCount: () => get().notifications.filter((n) => !n.read).length,
     }),
-    { name: 'vr-queue-store' }
+    { 
+      name: 'vr-queue-store',
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          const maxNum = findMaxTicketNumber(state.queue)
+          if (maxNum > state.ticketCounter) {
+            state.ticketCounter = maxNum
+          }
+        }
+      },
+    }
   )
 )

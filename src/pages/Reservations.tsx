@@ -16,6 +16,7 @@ import {
   ToggleRight,
   Calendar,
   Filter,
+  CheckCircle2,
 } from 'lucide-react'
 
 type TabType = 'rules' | 'reservations'
@@ -23,6 +24,14 @@ type DateFilter = 'today' | 'week' | 'all'
 type FormStep = 1 | 2 | 3 | 4
 
 const STEP_LABELS = ['选择会员', '选择设备', '设置时段', '起止日期']
+
+function isTimeValid(start: string, end: string): boolean {
+  return start < end
+}
+
+function isDateValid(start: string, end: string): boolean {
+  return start <= end
+}
 
 export default function Reservations() {
   const [activeTab, setActiveTab] = useState<TabType>('rules')
@@ -43,6 +52,9 @@ export default function Reservations() {
   const [adjustingReservation, setAdjustingReservation] = useState<Reservation | null>(null)
   const [adjustTime, setAdjustTime] = useState({ startTime: '', endTime: '' })
   const [adjustDeviceId, setAdjustDeviceId] = useState('')
+  const [timeError, setTimeError] = useState('')
+  const [dateError, setDateError] = useState('')
+  const [adjustError, setAdjustError] = useState('')
 
   const { cycleRules, reservations, addCycleRule, toggleCycleRule, cancelReservation, updateReservation, hasConflict } = useReservationStore()
   const { devices } = useDeviceStore()
@@ -76,17 +88,54 @@ export default function Reservations() {
     setFormStartDate('')
     setFormEndDate('')
     setPreviewResult(null)
+    setTimeError('')
+    setDateError('')
+  }
+
+  const canGoNext = (): boolean => {
+    if (step === 1 && !formMemberId) return false
+    if (step === 2 && !formDeviceId) return false
+    if (step === 3) {
+      if (!isTimeValid(formStartTime, formEndTime)) return false
+    }
+    if (step === 4 && !previewResult) {
+      if (!formStartDate || !formEndDate) return false
+      if (!isDateValid(formStartDate, formEndDate)) return false
+    }
+    return true
   }
 
   const handleNext = () => {
+    if (step === 3) {
+      if (!isTimeValid(formStartTime, formEndTime)) {
+        setTimeError('结束时间必须晚于开始时间')
+        return
+      }
+      setTimeError('')
+    }
     if (step < 4) setStep((step + 1) as FormStep)
   }
 
   const handlePrev = () => {
-    if (step > 1) setStep((step - 1) as FormStep)
+    if (step > 1) {
+      setStep((step - 1) as FormStep)
+      setTimeError('')
+      setDateError('')
+    }
   }
 
   const handlePreview = () => {
+    if (!isTimeValid(formStartTime, formEndTime)) {
+      setTimeError('结束时间必须晚于开始时间')
+      return
+    }
+    if (!isDateValid(formStartDate, formEndDate)) {
+      setDateError('结束日期必须晚于或等于开始日期')
+      return
+    }
+    setTimeError('')
+    setDateError('')
+
     const ruleData: Omit<CycleRule, 'id'> = {
       memberId: formMemberId,
       deviceId: formDeviceId,
@@ -99,7 +148,6 @@ export default function Reservations() {
     }
     const result = addCycleRule(ruleData)
     setPreviewResult(result)
-    setStep(4)
   }
 
   const handleCloseForm = () => {
@@ -111,10 +159,17 @@ export default function Reservations() {
     setAdjustingReservation(reservation)
     setAdjustTime({ startTime: reservation.startTime, endTime: reservation.endTime })
     setAdjustDeviceId(reservation.deviceId)
+    setAdjustError('')
   }
 
   const handleAdjustConfirm = () => {
     if (!adjustingReservation) return
+
+    if (!isTimeValid(adjustTime.startTime, adjustTime.endTime)) {
+      setAdjustError('结束时间必须晚于开始时间')
+      return
+    }
+
     const conflict = hasConflict(adjustDeviceId, adjustingReservation.date, adjustTime.startTime, adjustTime.endTime, adjustingReservation.id)
     updateReservation(adjustingReservation.id, {
       deviceId: adjustDeviceId,
@@ -122,15 +177,21 @@ export default function Reservations() {
       endTime: adjustTime.endTime,
       status: conflict ? 'conflict' : 'confirmed',
     })
+
     setAdjustingReservation(null)
+    setAdjustError('')
   }
 
   const getMemberName = (id: string) => getMemberById(id)?.name ?? id
   const getDeviceName = (id: string) => devices.find((d) => d.id === id)?.name ?? id
 
   return (
-    <div className="min-h-screen bg-[#0A0E1A] p-6">
-      <div className="mx-auto max-w-5xl">
+    <div className="min-h-screen bg-[#0A0E1A] pb-24 pt-6">
+      <div className="mx-auto max-w-5xl px-4">
+        <h1 className="mb-6 text-xl font-bold">
+          <span className="text-[#00F0FF]">周期</span>预约
+        </h1>
+
         <div className="mb-8 flex gap-1 rounded-lg bg-[#141B2D] p-1">
           {(['rules', 'reservations'] as TabType[]).map((tab) => (
             <button
@@ -165,7 +226,12 @@ export default function Reservations() {
               {cycleRules.map((rule) => (
                 <div
                   key={rule.id}
-                  className="rounded-lg border border-[#00F0FF]/20 bg-[#141B2D] p-4 transition-all hover:border-[#00F0FF]/40"
+                  className={cn(
+                    'rounded-lg border bg-[#141B2D] p-4 transition-all',
+                    rule.active
+                      ? 'border-[#00F0FF]/20 hover:border-[#00F0FF]/40'
+                      : 'border-gray-800 opacity-60'
+                  )}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -214,18 +280,17 @@ export default function Reservations() {
                   <div className="mb-6">
                     <div className="flex items-center gap-1">
                       {STEP_LABELS.map((label, i) => (
-                        <div key={i} className="flex items-center">
+                        <div key={i} className="flex items-center flex-1">
                           <div
                             className={cn(
-                              'h-2 flex-1 rounded-full transition-all',
+                              'h-2 w-full rounded-full transition-all',
                               i < step
                                 ? 'bg-gradient-to-r from-[#00F0FF] to-[#FF2D78]'
                                 : 'bg-gray-700'
                             )}
-                            style={{ minWidth: 60 }}
                           />
                           {i < STEP_LABELS.length - 1 && (
-                            <ChevronRight size={14} className="mx-1 text-gray-600" />
+                            <ChevronRight size={14} className="mx-1 shrink-0 text-gray-600" />
                           )}
                         </div>
                       ))}
@@ -302,7 +367,7 @@ export default function Reservations() {
                           <input
                             type="time"
                             value={formStartTime}
-                            onChange={(e) => setFormStartTime(e.target.value)}
+                            onChange={(e) => { setFormStartTime(e.target.value); setTimeError('') }}
                             className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                           />
                         </div>
@@ -311,11 +376,17 @@ export default function Reservations() {
                           <input
                             type="time"
                             value={formEndTime}
-                            onChange={(e) => setFormEndTime(e.target.value)}
+                            onChange={(e) => { setFormEndTime(e.target.value); setTimeError('') }}
                             className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                           />
                         </div>
                       </div>
+                      {timeError && (
+                        <div className="flex items-center gap-1.5 rounded-lg bg-[#FF2D78]/10 px-3 py-2">
+                          <AlertTriangle size={14} className="text-[#FF2D78]" />
+                          <span className="text-xs text-[#FF2D78]">{timeError}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -327,7 +398,7 @@ export default function Reservations() {
                           <input
                             type="date"
                             value={formStartDate}
-                            onChange={(e) => setFormStartDate(e.target.value)}
+                            onChange={(e) => { setFormStartDate(e.target.value); setDateError('') }}
                             className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                           />
                         </div>
@@ -336,27 +407,36 @@ export default function Reservations() {
                           <input
                             type="date"
                             value={formEndDate}
-                            onChange={(e) => setFormEndDate(e.target.value)}
+                            onChange={(e) => { setFormEndDate(e.target.value); setDateError('') }}
                             className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                           />
                         </div>
                       </div>
+                      {dateError && (
+                        <div className="flex items-center gap-1.5 rounded-lg bg-[#FF2D78]/10 px-3 py-2">
+                          <AlertTriangle size={14} className="text-[#FF2D78]" />
+                          <span className="text-xs text-[#FF2D78]">{dateError}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
                   {step === 4 && previewResult && (
                     <div className="space-y-4">
                       <div className="rounded-lg border border-[#00F0FF]/20 bg-[#0A0E1A] p-4">
-                        <p className="text-sm text-gray-400">
-                          将生成 <span className="text-lg font-bold text-[#00F0FF]">{previewResult.generated.length}</span> 条预约
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} className="text-[#00FF88]" />
+                          <p className="text-sm text-gray-300">
+                            已生成 <span className="text-lg font-bold text-[#00FF88]">{previewResult.generated.length}</span> 条预约
+                          </p>
+                        </div>
                         {previewResult.conflicts.length > 0 && (
                           <div className="mt-3">
                             <p className="flex items-center gap-1 text-sm text-[#FF2D78]">
                               <AlertTriangle size={14} />
                               {previewResult.conflicts.length} 条冲突
                             </p>
-                            <div className="mt-2 space-y-1">
+                            <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                               {previewResult.conflicts.map((c) => (
                                 <div key={c.id} className="rounded border border-[#FF2D78]/30 bg-[#FF2D78]/5 px-3 py-1.5 text-xs text-[#FF2D78]">
                                   {c.date} {c.startTime}-{c.endTime} {getDeviceName(c.deviceId)}
@@ -385,10 +465,7 @@ export default function Reservations() {
                       {step < 4 && (
                         <button
                           onClick={handleNext}
-                          disabled={
-                            (step === 1 && !formMemberId) ||
-                            (step === 2 && !formDeviceId)
-                          }
+                          disabled={!canGoNext()}
                           className="rounded-lg bg-gradient-to-r from-[#00F0FF] to-[#FF2D78] px-6 py-2 text-sm font-medium text-black transition-all hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] disabled:opacity-40"
                         >
                           下一步
@@ -397,7 +474,7 @@ export default function Reservations() {
                       {step === 4 && !previewResult && (
                         <button
                           onClick={handlePreview}
-                          disabled={!formStartDate || !formEndDate}
+                          disabled={!canGoNext()}
                           className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#00F0FF] to-[#FF2D78] px-6 py-2 text-sm font-medium text-black transition-all hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] disabled:opacity-40"
                         >
                           <Calendar size={14} />
@@ -480,10 +557,15 @@ export default function Reservations() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {r.status === 'conflict' && (
+                      {(r.status === 'conflict' || r.status === 'confirmed') && (
                         <button
                           onClick={() => handleAdjust(r)}
-                          className="rounded-md border border-[#FF2D78]/40 bg-[#FF2D78]/10 px-3 py-1 text-xs text-[#FF2D78] transition-all hover:bg-[#FF2D78]/20"
+                          className={cn(
+                            'rounded-md border px-3 py-1 text-xs transition-all',
+                            r.status === 'conflict'
+                              ? 'border-[#FF2D78]/40 bg-[#FF2D78]/10 text-[#FF2D78] hover:bg-[#FF2D78]/20'
+                              : 'border-[#00F0FF]/40 bg-[#00F0FF]/10 text-[#00F0FF] hover:bg-[#00F0FF]/20'
+                          )}
                         >
                           调整
                         </button>
@@ -509,7 +591,7 @@ export default function Reservations() {
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                 <div className="w-full max-w-md rounded-xl border border-[#FF2D78]/30 bg-[#141B2D] p-6 shadow-[0_0_30px_rgba(255,45,120,0.15)]">
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-[#FF2D78]">调整冲突预约</h3>
+                    <h3 className="text-lg font-semibold text-[#FF2D78]">调整预约</h3>
                     <button onClick={() => setAdjustingReservation(null)} className="text-gray-500 hover:text-white">
                       <X size={20} />
                     </button>
@@ -520,7 +602,7 @@ export default function Reservations() {
                       <label className="text-sm text-gray-400">更换设备</label>
                       <select
                         value={adjustDeviceId}
-                        onChange={(e) => setAdjustDeviceId(e.target.value)}
+                        onChange={(e) => { setAdjustDeviceId(e.target.value); setAdjustError('') }}
                         className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                       >
                         {devices.map((d) => (
@@ -536,7 +618,7 @@ export default function Reservations() {
                         <input
                           type="time"
                           value={adjustTime.startTime}
-                          onChange={(e) => setAdjustTime({ ...adjustTime, startTime: e.target.value })}
+                          onChange={(e) => { setAdjustTime({ ...adjustTime, startTime: e.target.value }); setAdjustError('') }}
                           className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                         />
                       </div>
@@ -545,10 +627,23 @@ export default function Reservations() {
                         <input
                           type="time"
                           value={adjustTime.endTime}
-                          onChange={(e) => setAdjustTime({ ...adjustTime, endTime: e.target.value })}
+                          onChange={(e) => { setAdjustTime({ ...adjustTime, endTime: e.target.value }); setAdjustError('') }}
                           className="w-full rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-2.5 text-white outline-none focus:border-[#00F0FF]"
                         />
                       </div>
+                    </div>
+                    {adjustError && (
+                      <div className="flex items-center gap-1.5 rounded-lg bg-[#FF2D78]/10 px-3 py-2">
+                        <AlertTriangle size={14} className="text-[#FF2D78]" />
+                        <span className="text-xs text-[#FF2D78]">{adjustError}</span>
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500">
+                      {hasConflict(adjustDeviceId, adjustingReservation.date, adjustTime.startTime, adjustTime.endTime, adjustingReservation.id) ? (
+                        <span className="text-[#FF2D78]">调整后仍与其他预约冲突</span>
+                      ) : (
+                        <span className="text-[#00FF88]">当前时段可用，可正常预约</span>
+                      )}
                     </div>
                   </div>
 
@@ -561,7 +656,8 @@ export default function Reservations() {
                     </button>
                     <button
                       onClick={handleAdjustConfirm}
-                      className="rounded-lg bg-gradient-to-r from-[#FF2D78] to-[#00F0FF] px-6 py-2 text-sm font-medium text-black transition-all hover:shadow-[0_0_20px_rgba(255,45,120,0.4)]"
+                      disabled={!isTimeValid(adjustTime.startTime, adjustTime.endTime)}
+                      className="rounded-lg bg-gradient-to-r from-[#FF2D78] to-[#00F0FF] px-6 py-2 text-sm font-medium text-black transition-all hover:shadow-[0_0_20px_rgba(255,45,120,0.4)] disabled:opacity-40"
                     >
                       确认调整
                     </button>

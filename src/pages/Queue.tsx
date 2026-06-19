@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { QueuePriority, QueueEntry } from '@/types'
+import type { QueuePriority, QueueEntry, Device } from '@/types'
 import { QUEUE_PRIORITY_LABELS } from '@/types'
 import { useQueueStore } from '@/stores/queueStore'
 import { useMemberStore } from '@/stores/memberStore'
@@ -16,6 +16,8 @@ import {
   UserPlus,
   X,
   Sparkles,
+  Monitor,
+  AlertTriangle,
 } from 'lucide-react'
 
 type InsertType = 'vip' | 'emergency' | null
@@ -30,6 +32,8 @@ export default function Queue() {
   const [insertReason, setInsertReason] = useState('')
   const [ticketAnimation, setTicketAnimation] = useState<QueueEntry | null>(null)
   const [flashKey, setFlashKey] = useState(0)
+  const [showDeviceSelect, setShowDeviceSelect] = useState(false)
+  const [completeMode, setCompleteMode] = useState<'idle' | 'disinfecting' | null>(null)
 
   const {
     currentServing,
@@ -44,9 +48,10 @@ export default function Queue() {
   } = useQueueStore()
 
   const { members, getMemberById } = useMemberStore()
-  const { devices } = useDeviceStore()
+  const { devices, updateDeviceStatus } = useDeviceStore()
 
   const sortedQueue = getSortedQueue()
+  const idleDevices = devices.filter((d) => d.status === 'idle')
 
   useEffect(() => {
     if (currentServing) {
@@ -82,6 +87,22 @@ export default function Queue() {
     }
   }
 
+  const handleCallNext = () => {
+    if (sortedQueue.length === 0) return
+    if (idleDevices.length === 0) return
+    if (idleDevices.length === 1) {
+      doCallNext(idleDevices[0].id)
+    } else {
+      setShowDeviceSelect(true)
+    }
+  }
+
+  const doCallNext = (deviceId: string) => {
+    callNext(deviceId)
+    updateDeviceStatus(deviceId, 'in-use')
+    setShowDeviceSelect(false)
+  }
+
   const handleInsert = (type: InsertType) => {
     setInsertType(type)
     setInsertMemberId('')
@@ -100,8 +121,28 @@ export default function Queue() {
     setInsertReason('')
   }
 
+  const handleComplete = () => {
+    setCompleteMode(null)
+    if (!currentServing) return
+    const deviceId = currentServing.deviceId
+    const status = completeMode ?? 'idle'
+    completeCurrent(status)
+    if (deviceId) {
+      updateDeviceStatus(deviceId, status)
+    }
+  }
+
+  const handleSkip = () => {
+    if (!currentServing) return
+    const deviceId = currentServing.deviceId
+    skipCurrent()
+    if (deviceId) {
+      updateDeviceStatus(deviceId, 'idle')
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-[#0A0E1A] pb-28">
+    <div className="min-h-screen bg-[#0A0E1A] pb-32">
       <div className="mx-auto max-w-5xl p-6">
         <div className="mb-8 rounded-xl border border-[#00F0FF]/30 bg-[#141B2D] p-8 text-center shadow-[0_0_40px_rgba(0,240,255,0.1)]">
           {currentServing ? (
@@ -114,15 +155,31 @@ export default function Queue() {
                 {getMemberName(currentServing.memberId)}
               </p>
               {currentServing.deviceId && (
-                <p className="mt-1 text-sm text-gray-400">
-                  {getDeviceName(currentServing.deviceId)}
-                </p>
+                <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#FF2D78]/20 px-4 py-2">
+                  <Monitor size={16} className="text-[#FF2D78]" />
+                  <span className="text-sm font-medium text-[#FF2D78]">
+                    {getDeviceName(currentServing.deviceId)}
+                  </span>
+                </div>
               )}
             </div>
           ) : (
             <div>
               <p className="text-2xl font-medium text-gray-600">等待叫号</p>
               <p className="mt-2 text-sm text-gray-700">点击下方"叫下一位"开始服务</p>
+            </div>
+          )}
+        </div>
+
+        <div className="mb-4 flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Monitor size={14} className="text-[#00F0FF]" />
+            <span>空闲设备 <span className="text-[#00F0FF] font-bold">{idleDevices.length}</span> 台</span>
+          </div>
+          {idleDevices.length === 0 && (
+            <div className="flex items-center gap-1 text-xs text-[#FF2D78]">
+              <AlertTriangle size={12} />
+              <span>暂无空闲设备</span>
             </div>
           )}
         </div>
@@ -218,33 +275,116 @@ export default function Queue() {
         </div>
       )}
 
+      {showDeviceSelect && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-[#00F0FF]/30 bg-[#141B2D] p-6 shadow-[0_0_30px_rgba(0,240,255,0.15)]">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-[#00F0FF]">选择设备</h3>
+              <button onClick={() => setShowDeviceSelect(false)} className="text-gray-500 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-gray-400">为下一位会员分配空闲设备</p>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {idleDevices.map((device) => (
+                <button
+                  key={device.id}
+                  onClick={() => doCallNext(device.id)}
+                  className="w-full flex items-center justify-between rounded-lg border border-[#00F0FF]/30 bg-[#0A0E1A] px-4 py-3 text-left transition-all hover:border-[#00F0FF] hover:bg-[#00F0FF]/5"
+                >
+                  <div>
+                    <span className="font-medium text-white">{device.name}</span>
+                    <p className="text-xs text-gray-500">{device.specs}</p>
+                  </div>
+                  <span className="flex items-center gap-1 rounded-full bg-[#00FF88]/10 px-2 py-0.5 text-xs text-[#00FF88]">
+                    空闲
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowDeviceSelect(false)}
+                className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:text-white"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {completeMode !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-[#00FF88]/30 bg-[#141B2D] p-6 shadow-[0_0_30px_rgba(0,255,136,0.15)]">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-[#00FF88]">完成服务</h3>
+              <button onClick={() => setCompleteMode(null)} className="text-gray-500 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-gray-400">
+              {currentServing?.deviceId && (
+                <>设备 <span className="text-white">{getDeviceName(currentServing.deviceId)}</span> 使用结束</>
+              )}
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => { setCompleteMode('idle'); handleComplete(); }}
+                className="w-full flex items-center gap-3 rounded-lg border border-[#00FF88]/30 bg-[#00FF88]/10 px-4 py-3 text-left transition-all hover:bg-[#00FF88]/20"
+              >
+                <CheckCircle size={20} className="text-[#00FF88]" />
+                <div>
+                  <span className="font-medium text-[#00FF88]">直接空闲</span>
+                  <p className="text-xs text-gray-500">设备立即恢复为空闲状态</p>
+                </div>
+              </button>
+              <button
+                onClick={() => { setCompleteMode('disinfecting'); handleComplete(); }}
+                className="w-full flex items-center gap-3 rounded-lg border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-left transition-all hover:bg-purple-500/20"
+              >
+                <AlertTriangle size={20} className="text-purple-400" />
+                <div>
+                  <span className="font-medium text-purple-400">需要消毒</span>
+                  <p className="text-xs text-gray-500">设备标记为消毒中，消毒后恢复</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="fixed bottom-0 left-0 right-0 border-t border-[#00F0FF]/20 bg-[#141B2D]/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 p-4">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 p-4">
           <div className="flex items-center gap-2">
             <button
-              onClick={() => callNext()}
-              className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#00F0FF] to-[#FF2D78] px-5 py-2.5 text-sm font-bold text-black shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all hover:shadow-[0_0_30px_rgba(0,240,255,0.5)]"
+              onClick={handleCallNext}
+              disabled={sortedQueue.length === 0 || idleDevices.length === 0}
+              className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#00F0FF] to-[#FF2D78] px-5 py-2.5 text-sm font-bold text-black shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all hover:shadow-[0_0_30px_rgba(0,240,255,0.5)] disabled:opacity-40"
             >
               <Mic size={16} />
               叫下一位
             </button>
             <button
-              onClick={() => skipCurrent()}
-              className="flex items-center gap-1.5 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-400 transition-all hover:bg-yellow-500/20"
+              onClick={handleSkip}
+              disabled={!currentServing}
+              className="flex items-center gap-1.5 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-400 transition-all hover:bg-yellow-500/20 disabled:opacity-40"
             >
               <SkipForward size={14} />
               跳号
             </button>
             <button
               onClick={() => recallCurrent()}
-              className="flex items-center gap-1.5 rounded-lg border border-[#00F0FF]/40 bg-[#00F0FF]/10 px-3 py-2 text-xs text-[#00F0FF] transition-all hover:bg-[#00F0FF]/20"
+              disabled={!currentServing}
+              className="flex items-center gap-1.5 rounded-lg border border-[#00F0FF]/40 bg-[#00F0FF]/10 px-3 py-2 text-xs text-[#00F0FF] transition-all hover:bg-[#00F0FF]/20 disabled:opacity-40"
             >
               <RotateCcw size={14} />
               召回
             </button>
             <button
-              onClick={() => completeCurrent()}
-              className="flex items-center gap-1.5 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-xs text-green-400 transition-all hover:bg-green-500/20"
+              onClick={() => setCompleteMode('idle')}
+              disabled={!currentServing}
+              className="flex items-center gap-1.5 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-xs text-green-400 transition-all hover:bg-green-500/20 disabled:opacity-40"
             >
               <CheckCircle size={14} />
               完成
